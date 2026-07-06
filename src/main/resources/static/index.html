@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Dashboard — Sistema de Matrícula</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="app-layout">
+
+    <!-- SIDEBAR — armado dinámicamente por buildSidebar() según permisos -->
+    <aside class="sidebar">
+        <div class="sidebar-logo">
+            <h2>🎓 MatriculaIE</h2>
+            <span>Sistema de Gestión</span>
+        </div>
+        <div class="sidebar-user">
+            <div class="avatar" id="sidebar-avatar">A</div>
+            <div class="info">
+                <p id="sidebar-name">Cargando...</p>
+                <span id="sidebar-rol"></span>
+            </div>
+        </div>
+        <nav class="sidebar-nav"></nav>
+        <div class="sidebar-bottom">
+            <a href="#" onclick="logout()">🚪 Cerrar sesión</a>
+        </div>
+    </aside>
+
+    <!-- MAIN -->
+    <div class="main-content">
+        <div class="topbar">
+            <div>
+                <h1>Dashboard</h1>
+                <div class="breadcrumb">Inicio / Dashboard</div>
+            </div>
+            <div>
+                <button class="btn btn-outline" onclick="mostrarCambioPassword()">
+                    🔑 Cambiar contraseña
+                </button>
+            </div>
+        </div>
+
+        <div class="page-body">
+            <!-- Stats -->
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-icon blue">👤</div>
+                    <div><h3 id="stat-alumnos">—</h3><p>Alumnos registrados</p></div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon green">📝</div>
+                    <div><h3 id="stat-matriculas">—</h3><p>Matrículas activas</p></div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon amber">💰</div>
+                    <div><h3 id="stat-recibos">—</h3><p>Pagos realizados</p></div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon purple">🏫</div>
+                    <div><h3 id="stat-aulas">—</h3><p>Aulas registradas</p></div>
+                </div>
+            </div>
+
+            <!-- Años académicos -->
+            <div class="card">
+                <div class="card-header">
+                    <h2>Años académicos activos</h2>
+                </div>
+                <div class="card-body">
+                    <div id="anios-lista" style="display:flex;gap:12px;flex-wrap:wrap"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- MODAL CAMBIAR CONTRASEÑA -->
+<div class="modal-overlay" id="modal-password">
+    <div class="modal">
+        <div class="modal-header">
+            <h3>Cambiar contraseña</h3>
+            <button class="modal-close" onclick="cerrarCambioPassword()">×</button>
+        </div>
+        <div class="modal-body">
+            <div id="password-alert"></div>
+            <div class="form-grid">
+                <div class="form-group full">
+                    <label>Contraseña actual *</label>
+                    <input type="password" id="p-actual" autocomplete="current-password">
+                </div>
+                <div class="form-group full">
+                    <label>Nueva contraseña (mín. 6 caracteres) *</label>
+                    <input type="password" id="p-nueva" autocomplete="new-password">
+                </div>
+                <div class="form-group full">
+                    <label>Confirmar nueva contraseña *</label>
+                    <input type="password" id="p-confirmar" autocomplete="new-password">
+                </div>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-outline" onclick="cerrarCambioPassword()">Cancelar</button>
+            <button class="btn btn-primary" onclick="cambiarPassword()">Actualizar</button>
+        </div>
+    </div>
+</div>
+
+<div id="toast"></div>
+<script src="js/api.js"></script>
+<script>
+    // Protección + sidebar + carga de datos
+    (async () => {
+        if (!(await protegerPagina())) return;
+        await cargarDashboard();
+    })();
+
+    // ── DASHBOARD ────────────────────────────────────────────────
+    async function cargarDashboard() {
+        try {
+            // Traemos años primero — el primero activo se usa para los otros stats
+            const anios = await api.get('/anios');
+            const anioActual = anios[0];
+
+            renderAnios(anios);
+
+            if (anioActual) {
+                await Promise.all([
+                    cargarStatAlumnos(),
+                    cargarStatAulas(anioActual.idAnio),
+                    cargarStatMatriculas(anioActual.idAnio),
+                    cargarStatPagos(anioActual.idAnio)
+                ]);
+            }
+        } catch (e) {
+            // Errores ya se toastean desde api.request. No repetimos aquí.
+        }
+    }
+
+    async function cargarStatAlumnos() {
+        try {
+            const page = await api.get('/alumnos?pagina=0&tamano=1');
+            setStat('stat-alumnos', page.totalRegistros);
+        } catch (e) { setStat('stat-alumnos', '—'); }
+    }
+
+    async function cargarStatAulas(idAnio) {
+        try {
+            const aulas = await api.get('/aulas?idAnio=' + idAnio);
+            setStat('stat-aulas', aulas.length);
+        } catch (e) { setStat('stat-aulas', '—'); }
+    }
+
+    async function cargarStatMatriculas(idAnio) {
+        try {
+            const rep = await api.get('/reportes/matriculados?idAnio=' + idAnio);
+            setStat('stat-matriculas', rep.length);
+        } catch (e) { setStat('stat-matriculas', '—'); }
+    }
+
+    async function cargarStatPagos(idAnio) {
+        try {
+            const rep = await api.get('/reportes/pagos?idAnio=' + idAnio);
+            setStat('stat-recibos', rep.length);
+        } catch (e) { setStat('stat-recibos', '—'); }
+    }
+
+    function setStat(id, val) {
+        const el = document.getElementById(id);
+        if (el) el.textContent = val;
+    }
+
+    function renderAnios(anios) {
+        const lista = document.getElementById('anios-lista');
+        if (!anios.length) {
+            lista.innerHTML = '<div class="badge badge-info">Sin años académicos registrados</div>';
+            return;
+        }
+        lista.innerHTML = anios.map(a => `
+            <div class="badge badge-info" style="font-size:14px;padding:6px 18px">
+                📅 ${a.anio} — ${a.descripcion || 'Año académico'}
+            </div>
+        `).join('');
+    }
+
+    // ── CAMBIO DE CONTRASEÑA ─────────────────────────────────────
+    function mostrarCambioPassword() {
+        document.getElementById('p-actual').value = '';
+        document.getElementById('p-nueva').value = '';
+        document.getElementById('p-confirmar').value = '';
+        document.getElementById('password-alert').innerHTML = '';
+        document.getElementById('modal-password').classList.add('open');
+    }
+
+    function cerrarCambioPassword() {
+        document.getElementById('modal-password').classList.remove('open');
+    }
+
+    async function cambiarPassword() {
+        const actual    = document.getElementById('p-actual').value;
+        const nueva     = document.getElementById('p-nueva').value;
+        const confirmar = document.getElementById('p-confirmar').value;
+        const alerta    = document.getElementById('password-alert');
+
+        if (!actual || !nueva || !confirmar) {
+            alerta.innerHTML = '<div class="alert alert-error">Complete todos los campos</div>';
+            return;
+        }
+        if (nueva !== confirmar) {
+            alerta.innerHTML = '<div class="alert alert-error">Las contraseñas nuevas no coinciden</div>';
+            return;
+        }
+        if (nueva.length < 6) {
+            alerta.innerHTML = '<div class="alert alert-error">La nueva contraseña debe tener al menos 6 caracteres</div>';
+            return;
+        }
+
+        try {
+            await api.post('/usuarios/me/cambiar-password', {
+                passwordActual: actual,
+                passwordNueva:  nueva
+            });
+            cerrarCambioPassword();
+            toast('Contraseña actualizada correctamente');
+        } catch (e) {
+            alerta.innerHTML = `<div class="alert alert-error">${e.message}</div>`;
+        }
+    }
+</script>
+</body>
+</html>

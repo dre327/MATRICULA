@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Permisos — Sistema de Matrícula</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="app-layout">
+    <aside class="sidebar">
+        <div class="sidebar-logo"><h2>🎓 MatriculaIE</h2><span>Sistema de Gestión</span></div>
+        <div class="sidebar-user">
+            <div class="avatar" id="sidebar-avatar">A</div>
+            <div class="info"><p id="sidebar-name"></p><span id="sidebar-rol"></span></div>
+        </div>
+        <nav class="sidebar-nav"></nav>
+        <div class="sidebar-bottom"><a href="#" onclick="logout()">🚪 Cerrar sesión</a></div>
+    </aside>
+
+    <div class="main-content">
+        <div class="topbar">
+            <div><h1>Permisos</h1><div class="breadcrumb">Seguridad / Permisos</div></div>
+            <button id="btn-aplicar" class="btn btn-primary" data-permiso="editar"
+                    onclick="aplicar()">✓ Aplicar cambios</button>
+        </div>
+
+        <div class="page-body">
+            <div class="card">
+                <div class="card-header">
+                    <h2>Matriz de permisos por rol</h2>
+                    <div class="search-bar">
+                        <label style="margin:0;font-size:13px">Rol:</label>
+                        <select id="f-rol" onchange="cargarPermisos()" style="min-width:250px"></select>
+                    </div>
+                </div>
+                <div class="card-body" style="padding:0">
+                    <div class="table-wrapper">
+                        <table>
+                            <thead>
+                            <tr>
+                                <th style="min-width:200px">Funcionalidad</th>
+                                <th style="text-align:center">Ver</th>
+                                <th style="text-align:center">Insertar</th>
+                                <th style="text-align:center">Editar</th>
+                                <th style="text-align:center">Eliminar</th>
+                                <th style="text-align:center">Imprimir</th>
+                                <th style="text-align:center">Todo</th>
+                            </tr>
+                            </thead>
+                            <tbody id="tabla-permisos">
+                            <tr><td colspan="7" style="text-align:center;padding:30px;color:var(--text-muted)">Seleccione un rol</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div id="toast"></div>
+<script src="js/api.js"></script>
+<script>
+    let funcionalidades = [];   // todas las funcionalidades del sistema
+    let permisosActuales = {};  // idFuncionalidad → {puedeVer, puedeInsertar, ...}
+
+    (async () => {
+        if (!(await protegerPagina())) return;
+        await Promise.all([cargarRoles(), cargarFuncionalidades()]);
+    })();
+
+    async function cargarRoles() {
+        try {
+            const roles = await api.get('/roles');
+            document.getElementById('f-rol').innerHTML =
+                '<option value="">Seleccione rol…</option>' +
+                roles.map(r => `<option value="${r.idRol}">${r.nombre}</option>`).join('');
+        } catch (e) {}
+    }
+
+    async function cargarFuncionalidades() {
+        try {
+            funcionalidades = (await api.get('/funcionalidades'))
+                .filter(f => f.url)   // solo hojas (las que tienen URL); no los grupos
+                .sort((a, b) => (a.orden || 0) - (b.orden || 0));
+        } catch (e) {}
+    }
+
+    async function cargarPermisos() {
+        const idRol = document.getElementById('f-rol').value;
+        if (!idRol) {
+            document.getElementById('tabla-permisos').innerHTML =
+                '<tr><td colspan="7" style="text-align:center;padding:30px;color:var(--text-muted)">Seleccione un rol</td></tr>';
+            return;
+        }
+        try {
+            const permisos = await api.get('/permisos/rol/' + idRol);
+            permisosActuales = {};
+            permisos.forEach(p => { permisosActuales[p.idFuncionalidad] = p; });
+            renderGrilla();
+        } catch (e) {}
+    }
+
+    function renderGrilla() {
+        const tbody = document.getElementById('tabla-permisos');
+        if (!funcionalidades.length) {
+            tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:30px;color:var(--text-muted)">No hay funcionalidades</td></tr>';
+            return;
+        }
+        tbody.innerHTML = funcionalidades.map(f => {
+            const p = permisosActuales[f.idFuncionalidad] || {};
+            return `
+                <tr>
+                    <td><strong>${f.nombre}</strong>
+                        <div style="font-size:11px;color:var(--text-muted)">${f.url}</div></td>
+                    ${checkbox(f.idFuncionalidad, 'puedeVer',       p.puedeVer)}
+                    ${checkbox(f.idFuncionalidad, 'puedeInsertar',  p.puedeInsertar)}
+                    ${checkbox(f.idFuncionalidad, 'puedeEditar',    p.puedeEditar)}
+                    ${checkbox(f.idFuncionalidad, 'puedeEliminar',  p.puedeEliminar)}
+                    ${checkbox(f.idFuncionalidad, 'puedeImprimir',  p.puedeImprimir)}
+                    <td style="text-align:center">
+                        <button class="btn btn-outline btn-sm" onclick="toggleTodo(${f.idFuncionalidad})">Todo</button>
+                    </td>
+                </tr>`;
+        }).join('');
+    }
+
+    function checkbox(idFunc, campo, valor) {
+        const checked = valor ? 'checked' : '';
+        return `<td style="text-align:center">
+            <input type="checkbox" data-func="${idFunc}" data-campo="${campo}" ${checked}>
+        </td>`;
+    }
+
+    function toggleTodo(idFunc) {
+        const checks = document.querySelectorAll(`input[data-func="${idFunc}"]`);
+        const todoMarcado = Array.from(checks).every(c => c.checked);
+        checks.forEach(c => c.checked = !todoMarcado);
+    }
+
+    async function aplicar() {
+        const idRol = parseInt(document.getElementById('f-rol').value);
+        if (!idRol) { toast('Seleccione un rol', 'error'); return; }
+
+        // Armar array a partir de los checkboxes de la grilla
+        const permisos = funcionalidades.map(f => {
+            const row = {
+                idFuncionalidad: f.idFuncionalidad,
+                puedeVer:       marcado(f.idFuncionalidad, 'puedeVer'),
+                puedeInsertar:  marcado(f.idFuncionalidad, 'puedeInsertar'),
+                puedeEditar:    marcado(f.idFuncionalidad, 'puedeEditar'),
+                puedeEliminar:  marcado(f.idFuncionalidad, 'puedeEliminar'),
+                puedeImprimir:  marcado(f.idFuncionalidad, 'puedeImprimir')
+            };
+            return row;
+        });
+
+        try {
+            await api.post('/permisos/aplicar', { idRol, permisos });
+            toast('Permisos aplicados. Los usuarios de este rol verán el cambio al recargar.');
+            cargarPermisos();
+        } catch (e) {}
+    }
+
+    function marcado(idFunc, campo) {
+        const el = document.querySelector(`input[data-func="${idFunc}"][data-campo="${campo}"]`);
+        return el?.checked || false;
+    }
+</script>
+</body>
+</html>

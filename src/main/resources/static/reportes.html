@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Reportes — Sistema</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="app-layout">
+    <aside class="sidebar">
+        <div class="sidebar-logo"><h2>🎓 MatriculaIE</h2><span>Sistema de Gestión</span></div>
+        <div class="sidebar-user">
+            <div class="avatar" id="sidebar-avatar">A</div>
+            <div class="info"><p id="sidebar-name"></p><span id="sidebar-rol"></span></div>
+        </div>
+        <nav class="sidebar-nav"></nav>
+        <div class="sidebar-bottom"><a href="#" onclick="logout()">🚪 Cerrar sesión</a></div>
+    </aside>
+
+    <div class="main-content">
+        <div class="topbar">
+            <div><h1>Reportes</h1><div class="breadcrumb">Reportes</div></div>
+            <div style="display:flex;gap:8px">
+                <button class="btn btn-outline" data-permiso="imprimir" onclick="imprimir()">
+                    🖨 Imprimir
+                </button>
+                <button class="btn btn-outline" data-permiso="imprimir" onclick="exportarCSV()">
+                    📥 Exportar CSV
+                </button>
+            </div>
+        </div>
+
+        <div class="page-body">
+            <div class="card">
+                <div class="card-header">
+                    <h2 id="reporte-titulo">Reporte</h2>
+                    <div class="search-bar">
+                        <label style="margin:0;font-size:13px">Reporte:</label>
+                        <select id="f-tipo" onchange="cargar()" style="min-width:220px">
+                            <option value="matriculados">📝 Alumnos matriculados</option>
+                            <option value="pagos">💰 Pagos realizados</option>
+                            <option value="deudas">📋 Deudas pendientes</option>
+                        </select>
+                        <label style="margin:0;font-size:13px">Año:</label>
+                        <select id="f-anio" onchange="cargar()" style="min-width:150px"></select>
+                    </div>
+                </div>
+                <div class="card-body" style="padding:0">
+                    <div class="table-wrapper">
+                        <table id="tabla-reporte">
+                            <thead id="reporte-thead"></thead>
+                            <tbody id="reporte-tbody">
+                            <tr><td colspan="10" style="text-align:center;padding:30px;color:var(--text-muted)">Seleccione filtros</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="card-footer" style="padding:12px 16px;color:var(--text-muted);font-size:13px">
+                    <span id="reporte-total">—</span>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div id="toast"></div>
+<script src="js/api.js"></script>
+<script>
+    // Configuración por tipo de reporte
+    const REPORTES = {
+        matriculados: {
+            titulo: 'Alumnos matriculados',
+            endpoint: '/reportes/matriculados',
+            columnas: [
+                { th: '#',        get: (r, i) => i + 1 },
+                { th: 'Alumno',   get: r => r.alumno },
+                { th: 'Documento', get: r => r.documento },
+                { th: 'Nivel',    get: r => r.nivel },
+                { th: 'Grado',    get: r => r.grado + '°' },
+                { th: 'Sección',  get: r => r.seccion },
+                { th: 'Fecha',    get: r => r.fecha }
+            ]
+        },
+        pagos: {
+            titulo: 'Pagos realizados',
+            endpoint: '/reportes/pagos',
+            columnas: [
+                { th: '#',         get: (r, i) => i + 1 },
+                { th: 'Boleta',    get: r => `<strong>${r.boleta}</strong>` },
+                { th: 'Alumno',    get: r => r.alumno },
+                { th: 'Documento', get: r => r.documento },
+                { th: 'Concepto',  get: r => r.concepto },
+                { th: 'Monto',     get: r => `S/ ${parseFloat(r.monto).toFixed(2)}` },
+                { th: 'Fecha',     get: r => r.fecha }
+            ]
+        },
+        deudas: {
+            titulo: 'Deudas pendientes',
+            endpoint: '/reportes/deudas',
+            columnas: [
+                { th: '#',         get: (r, i) => i + 1 },
+                { th: 'Alumno',    get: r => r.alumno },
+                { th: 'Documento', get: r => r.documento },
+                { th: 'Concepto',  get: r => r.concepto },
+                { th: 'Monto',     get: r => `S/ ${parseFloat(r.monto).toFixed(2)}` },
+                { th: 'Orden',     get: r => r.orden }
+            ]
+        }
+    };
+
+    let datosActuales = [];
+
+    (async () => {
+        if (!(await protegerPagina())) return;
+        await cargarAnios();
+    })();
+
+    async function cargarAnios() {
+        try {
+            const anios = await api.get('/anios');
+            document.getElementById('f-anio').innerHTML =
+                anios.map(a => `<option value="${a.idAnio}">${a.anio}</option>`).join('');
+            if (anios.length) cargar();
+        } catch (e) {}
+    }
+
+    async function cargar() {
+        const tipo = document.getElementById('f-tipo').value;
+        const idAnio = document.getElementById('f-anio').value;
+        if (!idAnio) return;
+
+        const cfg = REPORTES[tipo];
+        document.getElementById('reporte-titulo').textContent = cfg.titulo;
+        document.getElementById('reporte-thead').innerHTML =
+            '<tr>' + cfg.columnas.map(c => `<th>${c.th}</th>`).join('') + '</tr>';
+
+        try {
+            datosActuales = await api.get(`${cfg.endpoint}?idAnio=${idAnio}`);
+            renderTabla(cfg, datosActuales);
+        } catch (e) {}
+    }
+
+    function renderTabla(cfg, data) {
+        const tbody = document.getElementById('reporte-tbody');
+        if (!data.length) {
+            tbody.innerHTML = `<tr><td colspan="${cfg.columnas.length}" style="text-align:center;padding:30px;color:var(--text-muted)">Sin datos</td></tr>`;
+            document.getElementById('reporte-total').textContent = 'Total: 0 registros';
+            return;
+        }
+        tbody.innerHTML = data.map((r, i) => '<tr>' +
+            cfg.columnas.map(c => `<td>${c.get(r, i) ?? '—'}</td>`).join('') +
+            '</tr>').join('');
+        document.getElementById('reporte-total').textContent = `Total: ${data.length} registros`;
+        aplicarPermisosUI();
+    }
+
+    // ── EXPORT / IMPRIMIR ─────────────────────────────────────
+    function imprimir() {
+        window.print();
+    }
+
+    function exportarCSV() {
+        const tipo = document.getElementById('f-tipo').value;
+        const cfg = REPORTES[tipo];
+        const filas = [cfg.columnas.map(c => c.th).join(',')];
+        datosActuales.forEach((r, i) => {
+            filas.push(cfg.columnas.map(c => {
+                const val = c.get(r, i);
+                // Quitar HTML y escapar comas/comillas
+                const plain = String(val ?? '').replace(/<[^>]+>/g, '').replace(/"/g, '""');
+                return `"${plain}"`;
+            }).join(','));
+        });
+        const blob = new Blob([filas.join('\n')], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `reporte-${tipo}-${Date.now()}.csv`;
+        a.click();
+        URL.revokeObjectURL(url);
+        toast('CSV descargado');
+    }
+</script>
+</body>
+</html>

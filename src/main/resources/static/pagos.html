@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Pagos — Sistema</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="app-layout">
+    <aside class="sidebar">
+        <div class="sidebar-logo"><h2>🎓 MatriculaIE</h2><span>Sistema de Gestión</span></div>
+        <div class="sidebar-user">
+            <div class="avatar" id="sidebar-avatar">A</div>
+            <div class="info"><p id="sidebar-name"></p><span id="sidebar-rol"></span></div>
+        </div>
+        <nav class="sidebar-nav"></nav>
+        <div class="sidebar-bottom"><a href="#" onclick="logout()">🚪 Cerrar sesión</a></div>
+    </aside>
+
+    <div class="main-content">
+        <div class="topbar">
+            <div><h1>Registro de Pagos</h1><div class="breadcrumb">Operaciones / Pagos</div></div>
+        </div>
+
+        <div class="page-body">
+            <div class="card">
+                <div class="card-header"><h2>Buscar deudas del alumno</h2></div>
+                <div class="card-body">
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label>Año académico *</label>
+                            <select id="f-anio"></select>
+                        </div>
+                        <div class="form-group full">
+                            <label>Alumno *</label>
+                            <div style="display:flex;gap:8px">
+                                <input type="text" id="f-alumno-buscar"
+                                       placeholder="Buscar por nombre o documento…"
+                                       oninput="buscarAlumnos()">
+                                <button class="btn btn-outline" onclick="limpiarAlumno()">Limpiar</button>
+                            </div>
+                            <div id="alumno-resultados" style="margin-top:8px;max-height:180px;overflow:auto"></div>
+                            <div id="alumno-seleccionado" style="margin-top:8px"></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="card-footer" style="text-align:right;padding:12px 16px">
+                    <button id="btn-buscar" class="btn btn-primary" onclick="buscarDeudas()" disabled>
+                        🔍 Buscar deudas
+                    </button>
+                </div>
+            </div>
+
+            <div class="card" id="card-deudas" style="display:none;margin-top:20px">
+                <div class="card-header"><h2>Estado de cuotas</h2></div>
+                <div class="card-body" style="padding:0">
+                    <div class="table-wrapper">
+                        <table>
+                            <thead>
+                            <tr><th>Orden</th><th>Concepto</th><th>Monto</th><th>Estado</th><th>Acción</th></tr>
+                            </thead>
+                            <tbody id="tabla-deudas"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal recibo -->
+<div class="modal-overlay" id="modal-recibo">
+    <div class="modal">
+        <div class="modal-header">
+            <h3>Recibo generado</h3>
+            <button class="modal-close" onclick="cerrarRecibo()">×</button>
+        </div>
+        <div class="modal-body" id="recibo-body"></div>
+        <div class="modal-footer">
+            <button class="btn btn-primary" onclick="cerrarRecibo()">Cerrar</button>
+        </div>
+    </div>
+</div>
+
+<div id="toast"></div>
+<script src="js/api.js"></script>
+<script>
+    let alumnoSeleccionado = null;
+    let buscarTimer;
+
+    (async () => {
+        if (!(await protegerPagina())) return;
+        await cargarAnios();
+    })();
+
+    async function cargarAnios() {
+        try {
+            const anios = await api.get('/anios');
+            document.getElementById('f-anio').innerHTML =
+                anios.map(a => `<option value="${a.idAnio}">${a.anio}</option>`).join('');
+        } catch (e) {}
+    }
+
+    function buscarAlumnos() {
+        clearTimeout(buscarTimer);
+        buscarTimer = setTimeout(async () => {
+            const texto = document.getElementById('f-alumno-buscar').value.trim();
+            if (!texto) { document.getElementById('alumno-resultados').innerHTML = ''; return; }
+            // El backend AND-ea filtros: mandamos SÓLO uno según el tipo de texto.
+            const params = new URLSearchParams();
+            params.set('tamano', '8');
+            if (/^[0-9-]+$/.test(texto)) {
+                params.set('nroDocumento', texto);
+            } else {
+                params.set('apellido', texto);
+            }
+            try {
+                const page = await api.get('/alumnos?' + params.toString());
+                renderResultadosAlumno(page.contenido);
+            } catch (e) {}
+        }, 350);
+    }
+
+    function renderResultadosAlumno(lista) {
+        const cont = document.getElementById('alumno-resultados');
+        if (!lista.length) { cont.innerHTML = '<p style="color:var(--text-muted);font-size:13px">Sin resultados</p>'; return; }
+        cont.innerHTML = lista.map(a => `
+            <div class="lista-item" onclick='seleccionarAlumno(${JSON.stringify(a).replace(/'/g, "&apos;")})'
+                 style="padding:8px;border:1px solid var(--border);border-radius:6px;margin-bottom:4px;cursor:pointer">
+                <strong>${a.nombreCompleto}</strong>
+                <div style="font-size:12px;color:var(--text-muted)">${a.tipoDocumento?.descripcion || ''}: ${a.nroDocumento}</div>
+            </div>`).join('');
+    }
+
+    function seleccionarAlumno(a) {
+        alumnoSeleccionado = a;
+        document.getElementById('alumno-resultados').innerHTML = '';
+        document.getElementById('alumno-seleccionado').innerHTML = `
+            <div class="badge badge-info" style="padding:8px 14px;font-size:14px">
+                ✓ ${a.nombreCompleto} (${a.nroDocumento})
+            </div>`;
+        document.getElementById('f-alumno-buscar').value = '';
+        document.getElementById('btn-buscar').disabled = false;
+    }
+
+    function limpiarAlumno() {
+        alumnoSeleccionado = null;
+        document.getElementById('alumno-seleccionado').innerHTML = '';
+        document.getElementById('alumno-resultados').innerHTML = '';
+        document.getElementById('f-alumno-buscar').value = '';
+        document.getElementById('btn-buscar').disabled = true;
+        document.getElementById('card-deudas').style.display = 'none';
+    }
+
+    async function buscarDeudas() {
+        const idAnio = document.getElementById('f-anio').value;
+        if (!alumnoSeleccionado || !idAnio) return;
+        try {
+            const deudas = await api.get(`/pagos/deudas?idAlumno=${alumnoSeleccionado.idAlumno}&idAnio=${idAnio}`);
+            renderDeudas(deudas);
+            document.getElementById('card-deudas').style.display = '';
+        } catch (e) {}
+    }
+
+    function renderDeudas(deudas) {
+        const tbody = document.getElementById('tabla-deudas');
+        if (!deudas.length) {
+            tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:30px;color:var(--text-muted)">Sin cuotas registradas</td></tr>';
+            return;
+        }
+        tbody.innerHTML = deudas.map(d => {
+            const estado = d.estadoPago === 'C'
+                ? '<span class="badge badge-success">✓ Cancelado</span>'
+                : d.estadoPago === 'A'
+                    ? '<span class="badge badge-danger">Anulado</span>'
+                    : '<span class="badge badge-info">Pendiente</span>';
+            const btn = d.pagable
+                ? `<button class="btn btn-primary btn-sm" data-permiso="insertar" onclick="pagar(${d.idCuota})">💰 Pagar</button>`
+                : d.estadoPago === 'P'
+                    ? '<span style="color:var(--text-muted);font-size:12px">Pague las anteriores primero</span>'
+                    : '';
+            return `
+                <tr>
+                    <td><strong>${d.orden}</strong></td>
+                    <td>${d.concepto}</td>
+                    <td><strong>S/ ${parseFloat(d.monto).toFixed(2)}</strong></td>
+                    <td>${estado}</td>
+                    <td>${btn}</td>
+                </tr>`;
+        }).join('');
+        aplicarPermisosUI();
+    }
+
+    async function pagar(idCuota) {
+        if (!confirm('¿Confirma el pago de esta cuota?')) return;
+        const idAnio = parseInt(document.getElementById('f-anio').value);
+        try {
+            const recibo = await api.post('/pagos', {
+                idAlumno: alumnoSeleccionado.idAlumno,
+                idAnio, idCuota, observacion: null
+            });
+            mostrarRecibo(recibo);
+            buscarDeudas();  // refrescar tabla
+        } catch (e) {}
+    }
+
+    function mostrarRecibo(r) {
+        document.getElementById('recibo-body').innerHTML = `
+            <div style="text-align:center;padding:12px;background:#f8f9fa;border-radius:6px;margin-bottom:16px">
+                <h2 style="margin:0">${r.nroBoleta}</h2>
+                <p style="margin:6px 0;color:var(--text-muted)">Boleta de pago</p>
+            </div>
+            <p><strong>Concepto:</strong> ${r.cuota?.concepto?.descripcion || '—'}</p>
+            <p><strong>Monto pagado:</strong> S/ ${parseFloat(r.montoPagado).toFixed(2)}</p>
+            <p><strong>Fecha:</strong> ${r.fecPago}</p>`;
+        document.getElementById('modal-recibo').classList.add('open');
+        toast('Pago registrado');
+    }
+
+    function cerrarRecibo() {
+        document.getElementById('modal-recibo').classList.remove('open');
+    }
+</script>
+</body>
+</html>

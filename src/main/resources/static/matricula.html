@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Matrícula — Sistema</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="app-layout">
+    <aside class="sidebar">
+        <div class="sidebar-logo"><h2>🎓 MatriculaIE</h2><span>Sistema de Gestión</span></div>
+        <div class="sidebar-user">
+            <div class="avatar" id="sidebar-avatar">A</div>
+            <div class="info"><p id="sidebar-name"></p><span id="sidebar-rol"></span></div>
+        </div>
+        <nav class="sidebar-nav"></nav>
+        <div class="sidebar-bottom"><a href="#" onclick="logout()">🚪 Cerrar sesión</a></div>
+    </aside>
+
+    <div class="main-content">
+        <div class="topbar">
+            <div><h1>Registrar Matrícula</h1><div class="breadcrumb">Operaciones / Matrícula</div></div>
+        </div>
+
+        <div class="page-body">
+            <div class="card">
+                <div class="card-header"><h2>Datos de la matrícula</h2></div>
+                <div class="card-body">
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label>Año académico *</label>
+                            <select id="f-anio" onchange="cargarCupos()"></select>
+                        </div>
+                        <div class="form-group full">
+                            <label>Alumno *</label>
+                            <div style="display:flex;gap:8px">
+                                <input type="text" id="f-alumno-buscar"
+                                       placeholder="Buscar por nombre o documento…"
+                                       oninput="buscarAlumnos()">
+                                <button class="btn btn-outline" onclick="limpiarAlumno()">Limpiar</button>
+                            </div>
+                            <div id="alumno-resultados" style="margin-top:8px;max-height:180px;overflow:auto"></div>
+                            <div id="alumno-seleccionado" style="margin-top:8px"></div>
+                        </div>
+                        <div class="form-group full">
+                            <label>Aula *</label>
+                            <div id="lista-aulas">Seleccione un año primero…</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="card-footer" style="display:flex;justify-content:space-between;align-items:center;padding:12px 16px">
+                    <div id="estado-seleccion" style="color:var(--text-muted);font-size:13px">
+                        Seleccione año, alumno y aula
+                    </div>
+                    <button id="btn-matricular" class="btn btn-primary" data-permiso="insertar"
+                            onclick="matricular()">✓ Registrar matrícula</button>
+                </div>
+            </div>
+
+            <div class="card" id="card-resultado" style="display:none;margin-top:20px">
+                <div class="card-header"><h2>✓ Matrícula registrada</h2></div>
+                <div class="card-body">
+                    <div id="detalle-resultado"></div>
+                    <h3 style="margin-top:16px">Cuotas generadas</h3>
+                    <div class="table-wrapper">
+                        <table>
+                            <thead><tr><th>Orden</th><th>Concepto</th><th>Monto</th><th>Estado</th></tr></thead>
+                            <tbody id="tabla-cuotas"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div id="toast"></div>
+<script src="js/api.js"></script>
+<script>
+    let alumnoSeleccionado = null;
+    let aulaSeleccionada = null;
+    let cuposCache = [];
+    let buscarTimer;
+
+    (async () => {
+        if (!(await protegerPagina())) return;
+        await cargarAnios();
+        actualizarBoton();   // marca inicial del indicador
+    })();
+
+    async function cargarAnios() {
+        try {
+            const anios = await api.get('/anios');
+            document.getElementById('f-anio').innerHTML =
+                anios.map(a => `<option value="${a.idAnio}">${a.anio}</option>`).join('');
+            if (anios.length) cargarCupos();
+            actualizarBoton();
+        } catch (e) {}
+    }
+
+    async function cargarCupos() {
+        const idAnio = document.getElementById('f-anio').value;
+        if (!idAnio) return;
+        try {
+            cuposCache = await api.get('/aulas/cupos?idAnio=' + idAnio);
+            renderAulas();
+        } catch (e) {}
+    }
+
+    function renderAulas() {
+        const cont = document.getElementById('lista-aulas');
+        if (!cuposCache.length) {
+            cont.innerHTML = '<p style="color:var(--text-muted)">No hay aulas para este año</p>';
+            return;
+        }
+        // Delego click a nivel de contenedor (más robusto que onclick inline)
+        cont.innerHTML = `
+            <div class="table-wrapper">
+                <table>
+                    <thead><tr><th></th><th>Nivel</th><th>Grado</th><th>Sección</th><th>Ocupados</th><th>Cupos disp.</th></tr></thead>
+                    <tbody id="tbody-aulas"></tbody>
+                </table>
+            </div>`;
+
+        const tbody = document.getElementById('tbody-aulas');
+        cuposCache.forEach(c => {
+            const sinCupo = c.disponibles <= 0;
+            const seleccionada = aulaSeleccionada === c.idAula;
+            const tr = document.createElement('tr');
+            tr.style.cursor = sinCupo ? 'not-allowed' : 'pointer';
+            tr.style.opacity = sinCupo ? '0.5' : '1';
+            if (seleccionada) tr.style.background = '#e6f0ff';
+            tr.innerHTML = `
+                <td><input type="radio" name="aula" ${seleccionada ? 'checked' : ''} ${sinCupo ? 'disabled' : ''}></td>
+                <td>${c.nivel}</td>
+                <td>${c.grado}°</td>
+                <td><strong>${c.seccion}</strong></td>
+                <td>${c.ocupados}/${c.capacidad}</td>
+                <td>${sinCupo
+                    ? '<span class="badge badge-danger">Sin cupos</span>'
+                    : `<span class="badge badge-success">${c.disponibles}</span>`}</td>`;
+            if (!sinCupo) {
+                tr.addEventListener('click', () => seleccionarAula(c.idAula));
+            }
+            tbody.appendChild(tr);
+        });
+    }
+
+    function seleccionarAula(idAula) {
+        aulaSeleccionada = idAula;
+        renderAulas();
+        actualizarBoton();
+    }
+
+    // ── BUSCAR ALUMNO ──────────────────────────────────────────
+    // El backend AND-ea todos los filtros, así que mandamos UNO solo según
+    // lo que parezca el texto: si son sólo dígitos/guiones → documento;
+    // sino → apellido (que es lo más habitual al buscar por nombre).
+    function buscarAlumnos() {
+        clearTimeout(buscarTimer);
+        buscarTimer = setTimeout(async () => {
+            const texto = document.getElementById('f-alumno-buscar').value.trim();
+            if (!texto) {
+                document.getElementById('alumno-resultados').innerHTML = '';
+                return;
+            }
+            const params = new URLSearchParams();
+            params.set('tamano', '8');
+            if (/^[0-9-]+$/.test(texto)) {
+                params.set('nroDocumento', texto);
+            } else {
+                params.set('apellido', texto);
+            }
+            try {
+                const page = await api.get('/alumnos?' + params.toString());
+                renderResultadosAlumno(page.contenido);
+            } catch (e) {}
+        }, 350);
+    }
+
+    function renderResultadosAlumno(lista) {
+        const cont = document.getElementById('alumno-resultados');
+        if (!lista.length) { cont.innerHTML = '<p style="color:var(--text-muted);font-size:13px">Sin resultados</p>'; return; }
+        cont.innerHTML = lista.map(a => `
+            <div class="lista-item" onclick='seleccionarAlumno(${JSON.stringify(a).replace(/'/g, "&apos;")})'
+                 style="padding:8px;border:1px solid var(--border);border-radius:6px;margin-bottom:4px;cursor:pointer">
+                <strong>${a.nombreCompleto}</strong>
+                <div style="font-size:12px;color:var(--text-muted)">
+                    ${a.tipoDocumento?.descripcion || ''}: ${a.nroDocumento}
+                </div>
+            </div>`).join('');
+    }
+
+    function seleccionarAlumno(a) {
+        alumnoSeleccionado = a;
+        document.getElementById('alumno-resultados').innerHTML = '';
+        document.getElementById('alumno-seleccionado').innerHTML = `
+            <div class="badge badge-info" style="padding:8px 14px;font-size:14px">
+                ✓ ${a.nombreCompleto} (${a.nroDocumento})
+            </div>`;
+        document.getElementById('f-alumno-buscar').value = '';
+        actualizarBoton();
+    }
+
+    function limpiarAlumno() {
+        alumnoSeleccionado = null;
+        document.getElementById('alumno-seleccionado').innerHTML = '';
+        document.getElementById('alumno-resultados').innerHTML = '';
+        document.getElementById('f-alumno-buscar').value = '';
+        actualizarBoton();
+    }
+
+    // Indicador de estado (ya no manejo disabled del botón — la validación
+    // pasa a matricular() con mensajes de error claros)
+    function actualizarBoton() {
+        const idAnio = document.getElementById('f-anio').value;
+        const estado = document.getElementById('estado-seleccion');
+        const partes = [];
+        partes.push(idAnio ? '✓ Año' : '○ Año');
+        partes.push(alumnoSeleccionado
+            ? `✓ Alumno: ${alumnoSeleccionado.nombreCompleto}`
+            : '○ Alumno');
+        partes.push(aulaSeleccionada ? '✓ Aula' : '○ Aula');
+        estado.textContent = partes.join(' · ');
+        const listo = idAnio && alumnoSeleccionado && aulaSeleccionada;
+        estado.style.color = listo ? 'var(--success, green)' : 'var(--text-muted)';
+    }
+
+    // ── MATRICULAR ─────────────────────────────────────────────
+    async function matricular() {
+        const idAnio = parseInt(document.getElementById('f-anio').value);
+
+        // Validaciones claras (con toast visible) antes de mandar la request
+        if (!idAnio) {
+            toast('Seleccione un año académico', 'error');
+            return;
+        }
+        if (!alumnoSeleccionado) {
+            toast('Busque y seleccione un alumno primero', 'error');
+            return;
+        }
+        if (!aulaSeleccionada) {
+            toast('Seleccione un aula haciendo clic en una fila (que tenga cupos)', 'error');
+            return;
+        }
+
+        try {
+            const resp = await api.post('/matriculas', {
+                idAlumno: alumnoSeleccionado.idAlumno,
+                idAula:   aulaSeleccionada,
+                idAnio
+            });
+            toast('✓ Matrícula registrada correctamente');
+            mostrarResultado(resp);
+            await cargarCupos();
+            aulaSeleccionada = null;
+            limpiarAlumno();
+            actualizarBoton();
+        } catch (e) { /* toast global de api.js */ }
+    }
+
+    function mostrarResultado(r) {
+        document.getElementById('card-resultado').style.display = '';
+        document.getElementById('detalle-resultado').innerHTML = `
+            <p><strong>Alumno:</strong> ${r.alumno?.nombreCompleto || '—'}</p>
+            <p><strong>Aula:</strong> ${r.aula?.nivel?.nombre} ${r.aula?.grado}° "${r.aula?.seccion}"</p>
+            <p><strong>Fecha:</strong> ${r.fecMatricula}</p>`;
+
+        const tbody = document.getElementById('tabla-cuotas');
+        tbody.innerHTML = (r.cuotas || []).map(c => `
+            <tr>
+                <td>${c.concepto?.orden || '—'}</td>
+                <td>${c.concepto?.descripcion || '—'}</td>
+                <td><strong>S/ ${parseFloat(c.monto).toFixed(2)}</strong></td>
+                <td><span class="badge badge-info">Pendiente</span></td>
+            </tr>`).join('');
+    }
+</script>
+</body>
+</html>

@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Usuarios — Sistema de Matrícula</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="app-layout">
+    <aside class="sidebar">
+        <div class="sidebar-logo"><h2>🎓 MatriculaIE</h2><span>Sistema de Gestión</span></div>
+        <div class="sidebar-user">
+            <div class="avatar" id="sidebar-avatar">A</div>
+            <div class="info"><p id="sidebar-name"></p><span id="sidebar-rol"></span></div>
+        </div>
+        <nav class="sidebar-nav"></nav>
+        <div class="sidebar-bottom"><a href="#" onclick="logout()">🚪 Cerrar sesión</a></div>
+    </aside>
+
+    <div class="main-content">
+        <div class="topbar">
+            <div><h1>Usuarios</h1><div class="breadcrumb">Seguridad / Usuarios</div></div>
+            <button id="btn-nuevo" class="btn btn-primary" data-permiso="insertar"
+                    onclick="abrirModal()">+ Nuevo usuario</button>
+        </div>
+
+        <div class="page-body">
+            <div class="card">
+                <div class="card-header"><h2>Listado</h2></div>
+                <div class="card-body" style="padding:0">
+                    <div class="table-wrapper">
+                        <table>
+                            <thead>
+                            <tr>
+                                <th>#</th><th>Usuario</th><th>Nombre completo</th>
+                                <th>Rol</th><th>Estado</th><th>Acciones</th>
+                            </tr>
+                            </thead>
+                            <tbody id="tabla-usuarios">
+                            <tr><td colspan="6" style="text-align:center;padding:30px;color:var(--text-muted)">Cargando…</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal-overlay" id="modal-overlay">
+    <div class="modal">
+        <div class="modal-header">
+            <h3 id="modal-titulo">Nuevo usuario</h3>
+            <button class="modal-close" onclick="cerrarModal()">×</button>
+        </div>
+        <div class="modal-body">
+            <div id="modal-alert"></div>
+            <div class="form-grid">
+                <div class="form-group">
+                    <label>Usuario * (3-50, sin espacios)</label>
+                    <input type="text" id="f-username" maxlength="50" autocomplete="off"
+                           oninput="this.value = this.value.replace(/[^a-zA-Z0-9._-]/g,'')">
+                </div>
+                <div class="form-group" id="grupo-password">
+                    <label>Contraseña * (mín. 6)</label>
+                    <input type="password" id="f-password" maxlength="100" autocomplete="new-password">
+                </div>
+                <div class="form-group full">
+                    <label>Nombre completo *</label>
+                    <input type="text" id="f-nombre" maxlength="100">
+                </div>
+                <div class="form-group full">
+                    <label>Rol *</label>
+                    <select id="f-rol"></select>
+                </div>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-outline" onclick="cerrarModal()">Cancelar</button>
+            <button class="btn btn-primary" onclick="guardar()">Guardar</button>
+        </div>
+    </div>
+</div>
+
+<div id="toast"></div>
+<script src="js/api.js"></script>
+<script>
+    let editandoId = null;
+
+    (async () => {
+        if (!(await protegerPagina())) return;
+        await cargarRoles();
+        await cargar();
+    })();
+
+    async function cargarRoles() {
+        try {
+            const roles = await api.get('/roles');
+            document.getElementById('f-rol').innerHTML =
+                '<option value="">Seleccione…</option>' +
+                roles.map(r => `<option value="${r.idRol}">${r.nombre}</option>`).join('');
+        } catch (e) {}
+    }
+
+    async function cargar() {
+        try { renderTabla(await api.get('/usuarios')); } catch (e) {}
+    }
+
+    function renderTabla(data) {
+        const tbody = document.getElementById('tabla-usuarios');
+        if (!data.length) {
+            tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:30px;color:var(--text-muted)">Sin usuarios</td></tr>';
+            return;
+        }
+        tbody.innerHTML = data.map((u, i) => `
+            <tr>
+                <td>${i + 1}</td>
+                <td><strong>${u.username}</strong></td>
+                <td>${u.nombreCompleto}</td>
+                <td><span class="badge badge-info">${u.rol?.nombre || '—'}</span></td>
+                <td>${u.estado ? '<span class="badge badge-success">Activo</span>' : '<span class="badge badge-danger">Inactivo</span>'}</td>
+                <td>
+                    <button class="btn btn-outline btn-sm" data-permiso="editar" onclick="editar(${u.idUsuario})">✏</button>
+                    <button class="btn btn-danger btn-sm" data-permiso="eliminar" onclick="eliminar(${u.idUsuario})">🗑</button>
+                </td>
+            </tr>`).join('');
+        aplicarPermisosUI();
+    }
+
+    function abrirModal() {
+        editandoId = null;
+        document.getElementById('modal-titulo').textContent = 'Nuevo usuario';
+        document.getElementById('modal-alert').innerHTML = '';
+        ['f-username','f-password','f-nombre'].forEach(id => document.getElementById(id).value = '');
+        document.getElementById('f-rol').value = '';
+        document.getElementById('f-username').disabled = false;
+        document.getElementById('grupo-password').style.display = '';
+        document.getElementById('modal-overlay').classList.add('open');
+    }
+
+    function cerrarModal() { document.getElementById('modal-overlay').classList.remove('open'); }
+
+    async function editar(id) {
+        try {
+            const u = await api.get('/usuarios/' + id);
+            editandoId = u.idUsuario;
+            document.getElementById('modal-titulo').textContent = 'Editar usuario';
+            document.getElementById('modal-alert').innerHTML = '';
+            document.getElementById('f-username').value = u.username;
+            document.getElementById('f-username').disabled = true;   // no editable
+            document.getElementById('grupo-password').style.display = 'none';  // password se cambia en /me
+            document.getElementById('f-nombre').value = u.nombreCompleto;
+            document.getElementById('f-rol').value = u.rol?.idRol || '';
+            document.getElementById('modal-overlay').classList.add('open');
+        } catch (e) {}
+    }
+
+    async function guardar() {
+        const alerta = document.getElementById('modal-alert');
+        const nombreCompleto = document.getElementById('f-nombre').value.trim();
+        const idRol = parseInt(document.getElementById('f-rol').value);
+
+        if (!nombreCompleto || !idRol) {
+            alerta.innerHTML = '<div class="alert alert-error">Complete los campos obligatorios</div>';
+            return;
+        }
+
+        try {
+            if (editandoId) {
+                await api.put('/usuarios/' + editandoId, { nombreCompleto, idRol });
+                toast('Usuario actualizado');
+            } else {
+                const username = document.getElementById('f-username').value.trim();
+                const password = document.getElementById('f-password').value;
+                if (username.length < 3 || password.length < 6) {
+                    alerta.innerHTML = '<div class="alert alert-error">Usuario mín. 3 y contraseña mín. 6 caracteres</div>';
+                    return;
+                }
+                await api.post('/usuarios', { username, password, nombreCompleto, idRol });
+                toast('Usuario creado');
+            }
+            cerrarModal();
+            cargar();
+        } catch (e) {
+            alerta.innerHTML = `<div class="alert alert-error">${e.message}</div>`;
+        }
+    }
+
+    async function eliminar(id) {
+        if (!confirm('¿Eliminar este usuario?')) return;
+        try { await api.del('/usuarios/' + id); toast('Usuario eliminado'); cargar(); } catch (e) {}
+    }
+</script>
+</body>
+</html>

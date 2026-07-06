@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login — Sistema de Matrícula</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="login-wrapper">
+    <div class="login-card">
+        <div class="logo">
+            <div style="font-size:40px">🎓</div>
+            <h1>Sistema de Matrícula</h1>
+            <p>Ingrese sus credenciales para continuar</p>
+        </div>
+
+        <div id="alert-login"></div>
+
+        <div class="form-group" style="margin-bottom:14px">
+            <label>Usuario</label>
+            <input type="text" id="username" placeholder="Ingrese su usuario"
+                   autocomplete="username" autofocus>
+        </div>
+
+        <div class="form-group" style="margin-bottom:22px">
+            <label>Contraseña</label>
+            <input type="password" id="password" placeholder="Ingrese su contraseña"
+                   autocomplete="current-password">
+        </div>
+
+        <button id="btn-login" class="btn btn-primary"
+                style="width:100%;justify-content:center;padding:10px"
+                onclick="hacerLogin()">
+            Ingresar al sistema
+        </button>
+
+        <p style="text-align:center;margin-top:16px;font-size:12px;color:var(--text-muted)">
+            I.E. Sistema de Control de Matrículas
+        </p>
+    </div>
+</div>
+
+<div id="toast"></div>
+<script src="js/api.js"></script>
+<script>
+    // Si ya hay sesión válida, saltar al dashboard.
+    (async () => {
+        try {
+            await session.refresh();
+            location.href = 'index.html';
+        } catch (e) {
+            // No hay sesión → mantener en login (comportamiento por default)
+            session.clearCache();
+        }
+    })();
+
+    // Enter para submit
+    document.addEventListener('keydown', e => {
+        if (e.key === 'Enter') hacerLogin();
+    });
+
+    async function hacerLogin() {
+        const username = document.getElementById('username').value.trim();
+        const password = document.getElementById('password').value;
+        const alerta   = document.getElementById('alert-login');
+        const boton    = document.getElementById('btn-login');
+
+        alerta.innerHTML = '';
+        if (!username || !password) {
+            alerta.innerHTML = '<div class="alert alert-error">⚠ Complete todos los campos</div>';
+            return;
+        }
+
+        boton.disabled = true;
+        boton.textContent = 'Ingresando…';
+
+        try {
+            const respuesta = await api.post('/auth/login', { username, password });
+            // respuesta = { usuario: {...}, permisos: [...] }
+            session.setAuth(respuesta);
+            location.href = 'index.html';
+        } catch (e) {
+            const msg = e.status === 401
+                ? 'Usuario o contraseña incorrectos'
+                : (e.payload?.message || 'Error al ingresar. Intente nuevamente.');
+            alerta.innerHTML = `<div class="alert alert-error">✕ ${msg}</div>`;
+        } finally {
+            boton.disabled = false;
+            boton.textContent = 'Ingresar al sistema';
+        }
+    }
+</script>
+</body>
+</html>
