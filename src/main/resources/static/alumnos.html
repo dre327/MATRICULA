@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Alumnos — Sistema de Matrícula</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="app-layout">
+    <!-- SIDEBAR — armado por buildSidebar() según permisos del usuario -->
+    <aside class="sidebar">
+        <div class="sidebar-logo"><h2>🎓 MatriculaIE</h2><span>Sistema de Gestión</span></div>
+        <div class="sidebar-user">
+            <div class="avatar" id="sidebar-avatar">A</div>
+            <div class="info"><p id="sidebar-name"></p><span id="sidebar-rol"></span></div>
+        </div>
+        <nav class="sidebar-nav"></nav>
+        <div class="sidebar-bottom"><a href="#" onclick="logout()">🚪 Cerrar sesión</a></div>
+    </aside>
+
+    <div class="main-content">
+        <div class="topbar">
+            <div><h1>Alumnos</h1><div class="breadcrumb">Mantenimiento / Alumnos</div></div>
+            <button id="btn-nuevo" class="btn btn-primary" data-permiso="insertar"
+                    onclick="abrirModal()">+ Nuevo alumno</button>
+        </div>
+
+        <div class="page-body">
+            <div class="card">
+                <div class="card-header">
+                    <h2>Listado de alumnos</h2>
+                    <div class="search-bar">
+                        <input type="text" id="f-nombre-buscar" placeholder="Buscar por nombre…"
+                               oninput="onFiltroChange()">
+                        <input type="text" id="f-apellido-buscar" placeholder="Buscar por apellido…"
+                               oninput="onFiltroChange()">
+                        <input type="text" id="f-doc-buscar" placeholder="N° documento…"
+                               oninput="onFiltroChange()">
+                    </div>
+                </div>
+                <div class="card-body" style="padding:0">
+                    <div class="table-wrapper">
+                        <table>
+                            <thead>
+                            <tr>
+                                <th>#</th>
+                                <th>Apellidos y nombres</th>
+                                <th>Documento</th>
+                                <th>Sexo</th>
+                                <th>Fec. Nacimiento</th>
+                                <th>Estado</th>
+                                <th>Acciones</th>
+                            </tr>
+                            </thead>
+                            <tbody id="tabla-alumnos">
+                            <tr><td colspan="7" style="text-align:center;padding:30px;color:var(--text-muted)">Cargando…</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="card-footer" id="paginador"
+                     style="display:flex;justify-content:space-between;align-items:center;padding:12px 16px">
+                    <span id="paginador-info" style="color:var(--text-muted);font-size:13px">—</span>
+                    <div style="display:flex;gap:6px">
+                        <button class="btn btn-outline btn-sm" id="btn-prev" onclick="cambiarPagina(-1)">◄ Anterior</button>
+                        <button class="btn btn-outline btn-sm" id="btn-next" onclick="cambiarPagina(1)">Siguiente ►</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- MODAL -->
+<div class="modal-overlay" id="modal-overlay">
+    <div class="modal">
+        <div class="modal-header">
+            <h3 id="modal-titulo">Nuevo alumno</h3>
+            <button class="modal-close" onclick="cerrarModal()">×</button>
+        </div>
+        <div class="modal-body">
+            <div id="modal-alert"></div>
+            <div class="form-grid">
+                <div class="form-group">
+                    <label>Tipo de documento *</label>
+                    <select id="f-tipoDoc" onchange="ajustarDocumento()">
+                        <option value="">Seleccione…</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>N° de documento *</label>
+                    <input type="text" id="f-nroDoc" maxlength="20" placeholder="Número">
+                </div>
+                <div class="form-group">
+                    <label>Apellido paterno *</label>
+                    <input type="text" id="f-apPaterno" maxlength="60" placeholder="Apellido paterno"
+                           oninput="soloLetras(this)">
+                </div>
+                <div class="form-group">
+                    <label>Apellido materno *</label>
+                    <input type="text" id="f-apMaterno" maxlength="60" placeholder="Apellido materno"
+                           oninput="soloLetras(this)">
+                </div>
+                <div class="form-group full">
+                    <label>Nombres *</label>
+                    <input type="text" id="f-nombre" maxlength="80" placeholder="Nombres completos"
+                           oninput="soloLetras(this)">
+                </div>
+                <div class="form-group">
+                    <label>Fecha de nacimiento</label>
+                    <input type="date" id="f-fecNac">
+                </div>
+                <div class="form-group">
+                    <label>Sexo</label>
+                    <select id="f-sexo">
+                        <option value="">Seleccione…</option>
+                        <option value="M">Masculino</option>
+                        <option value="F">Femenino</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-outline" onclick="cerrarModal()">Cancelar</button>
+            <button class="btn btn-primary" onclick="guardar()">Guardar</button>
+        </div>
+    </div>
+</div>
+
+<div id="toast"></div>
+<script src="js/api.js"></script>
+<script>
+    let editandoId = null;
+    let tiposDocs  = [];
+    let paginaActual = 0;
+    let totalPaginas = 0;
+    let filtroTimer;
+    const TAMANO = 20;
+
+    // ── Init ─────────────────────────────────────────────────────
+    (async () => {
+        if (!(await protegerPagina())) return;
+        await cargarTiposDocumento();
+        await cargarAlumnos();
+    })();
+
+    // ── Cargar tipos documento (para dropdown) ───────────────────
+    async function cargarTiposDocumento() {
+        try {
+            tiposDocs = await api.get('/tipos-documento');
+            const sel = document.getElementById('f-tipoDoc');
+            tiposDocs.forEach(t => {
+                sel.innerHTML += `<option value="${t.idTipoDoc}">${t.descripcion}</option>`;
+            });
+        } catch (e) { /* toast lo maneja api.js */ }
+    }
+
+    // ── Buscar / listar con paginación ───────────────────────────
+    async function cargarAlumnos() {
+        const nombre    = document.getElementById('f-nombre-buscar').value.trim();
+        const apellido  = document.getElementById('f-apellido-buscar').value.trim();
+        const nroDoc    = document.getElementById('f-doc-buscar').value.trim();
+
+        const params = new URLSearchParams();
+        if (nombre)   params.set('nombre', nombre);
+        if (apellido) params.set('apellido', apellido);
+        if (nroDoc)   params.set('nroDocumento', nroDoc);
+        params.set('pagina', paginaActual);
+        params.set('tamano', TAMANO);
+
+        try {
+            const page = await api.get('/alumnos?' + params.toString());
+            renderTabla(page.contenido);
+            renderPaginador(page);
+        } catch (e) { /* toast global */ }
+    }
+
+    function onFiltroChange() {
+        clearTimeout(filtroTimer);
+        filtroTimer = setTimeout(() => { paginaActual = 0; cargarAlumnos(); }, 350);
+    }
+
+    function cambiarPagina(delta) {
+        const nueva = paginaActual + delta;
+        if (nueva < 0 || nueva >= totalPaginas) return;
+        paginaActual = nueva;
+        cargarAlumnos();
+    }
+
+    function renderPaginador(page) {
+        totalPaginas = page.totalPaginas;
+        document.getElementById('paginador-info').textContent =
+            `Total: ${page.totalRegistros} · Página ${page.pagina + 1} de ${Math.max(page.totalPaginas, 1)}`;
+        document.getElementById('btn-prev').disabled = page.pagina === 0;
+        document.getElementById('btn-next').disabled = page.pagina >= page.totalPaginas - 1;
+    }
+
+    function renderTabla(data) {
+        const tbody = document.getElementById('tabla-alumnos');
+        if (!data.length) {
+            tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:30px;color:var(--text-muted)">Sin resultados</td></tr>';
+            return;
+        }
+        const inicio = paginaActual * TAMANO;
+        tbody.innerHTML = data.map((a, i) => `
+            <tr>
+                <td>${inicio + i + 1}</td>
+                <td><strong>${escapeHtml(a.nombreCompleto || (a.apPaterno + ' ' + a.apMaterno + ', ' + a.nombre))}</strong></td>
+                <td>${escapeHtml(a.tipoDocumento?.descripcion || '—')}: ${escapeHtml(a.nroDocumento)}</td>
+                <td>${a.sexo === 'M' ? '♂ Masc.' : a.sexo === 'F' ? '♀ Fem.' : '—'}</td>
+                <td>${a.fecNacimiento || '—'}</td>
+                <td>${badgeEstado(a.estado)}</td>
+                <td>
+                    <button class="btn btn-outline btn-sm" data-permiso="editar"
+                            onclick="editar(${a.idAlumno})">✏</button>
+                    <button class="btn btn-danger btn-sm" data-permiso="eliminar"
+                            onclick="eliminar(${a.idAlumno})">🗑</button>
+                </td>
+            </tr>
+        `).join('');
+        aplicarPermisosUI();   // re-aplica a los botones recién generados
+    }
+
+    function badgeEstado(estado) {
+        return estado
+            ? '<span class="badge badge-success">Activo</span>'
+            : '<span class="badge badge-danger">Inactivo</span>';
+    }
+
+    function escapeHtml(s) {
+        return String(s ?? '')
+            .replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
+            .replaceAll('"', '&quot;').replaceAll("'", '&#39;');
+    }
+
+    // ── Modal CRUD ───────────────────────────────────────────────
+    function abrirModal(id = null) {
+        editandoId = id;
+        document.getElementById('modal-titulo').textContent = id ? 'Editar alumno' : 'Nuevo alumno';
+        document.getElementById('modal-alert').innerHTML = '';
+        limpiarForm();
+        // En update, el tipo de documento no se puede cambiar (parte de la UK)
+        document.getElementById('f-tipoDoc').disabled = !!id;
+        document.getElementById('f-nroDoc').disabled  = !!id;
+        document.getElementById('modal-overlay').classList.add('open');
+    }
+
+    function cerrarModal() {
+        document.getElementById('modal-overlay').classList.remove('open');
+        editandoId = null;
+    }
+
+    function limpiarForm() {
+        ['f-apPaterno','f-apMaterno','f-nombre','f-nroDoc','f-fecNac'].forEach(id => {
+            document.getElementById(id).value = '';
+        });
+        document.getElementById('f-tipoDoc').value = '';
+        document.getElementById('f-sexo').value = '';
+    }
+
+    async function editar(id) {
+        try {
+            const a = await api.get('/alumnos/' + id);
+            abrirModal(id);
+            document.getElementById('f-tipoDoc').value  = a.tipoDocumento?.idTipoDoc || '';
+            document.getElementById('f-nroDoc').value   = a.nroDocumento;
+            document.getElementById('f-apPaterno').value = a.apPaterno;
+            document.getElementById('f-apMaterno').value = a.apMaterno;
+            document.getElementById('f-nombre').value   = a.nombre;
+            document.getElementById('f-fecNac').value   = a.fecNacimiento || '';
+            document.getElementById('f-sexo').value     = a.sexo || '';
+        } catch (e) {}
+    }
+
+    async function guardar() {
+        const alerta = document.getElementById('modal-alert');
+        const idTipoDoc  = document.getElementById('f-tipoDoc').value;
+        const nroDoc     = document.getElementById('f-nroDoc').value.trim();
+        const apPaterno  = document.getElementById('f-apPaterno').value.trim();
+        const apMaterno  = document.getElementById('f-apMaterno').value.trim();
+        const nombre     = document.getElementById('f-nombre').value.trim();
+
+        if (!apPaterno || !apMaterno || !nombre || (!editandoId && (!nroDoc || !idTipoDoc))) {
+            alerta.innerHTML = '<div class="alert alert-error">⚠ Complete los campos obligatorios</div>';
+            return;
+        }
+
+        const errorDoc = !editandoId ? validarDocumento() : null;
+        if (errorDoc) {
+            alerta.innerHTML = `<div class="alert alert-error">⚠ ${errorDoc}</div>`;
+            return;
+        }
+
+        const bodyBase = {
+            apPaterno, apMaterno, nombre,
+            fecNacimiento: document.getElementById('f-fecNac').value || null,
+            sexo:          document.getElementById('f-sexo').value || null
+        };
+
+        try {
+            if (editandoId) {
+                await api.put('/alumnos/' + editandoId, bodyBase);
+                toast('Alumno actualizado correctamente');
+            } else {
+                await api.post('/alumnos', {
+                    ...bodyBase,
+                    idTipoDocumento: parseInt(idTipoDoc),
+                    nroDocumento:    nroDoc
+                });
+                toast('Alumno registrado correctamente');
+            }
+            cerrarModal();
+            cargarAlumnos();
+        } catch (e) {
+            alerta.innerHTML = `<div class="alert alert-error">✕ ${e.message}</div>`;
+        }
+    }
+
+    async function eliminar(id) {
+        if (!confirm('¿Está seguro de eliminar este alumno?')) return;
+        try {
+            await api.del('/alumnos/' + id);
+            toast('Alumno eliminado');
+            cargarAlumnos();
+        } catch (e) {}
+    }
+
+    // ── Validaciones cliente para el N° documento ────────────────
+    function soloLetras(input) {
+        input.value = input.value.replace(/[^a-zA-ZáéíóúÁÉÍÓÚñÑ\s]/g, '');
+    }
+
+    function ajustarDocumento() {
+        const sel   = document.getElementById('f-tipoDoc');
+        const texto = sel.options[sel.selectedIndex]?.text.toUpperCase() || '';
+        const nroDoc = document.getElementById('f-nroDoc');
+        nroDoc.value = '';
+
+        if (texto.includes('DNI')) {
+            nroDoc.maxLength = 8;
+            nroDoc.placeholder = '8 dígitos numéricos';
+            nroDoc.oninput = () => { nroDoc.value = nroDoc.value.replace(/\D/g, '').slice(0, 8); };
+        } else if (texto.includes('CARNET') || texto.includes('EXTRANJERIA')) {
+            nroDoc.maxLength = 12;
+            nroDoc.placeholder = 'Alfanumérico';
+            nroDoc.oninput = () => { nroDoc.value = nroDoc.value.replace(/[^a-zA-Z0-9]/g, '').toUpperCase(); };
+        } else if (texto.includes('PASAPORTE')) {
+            nroDoc.maxLength = 12;
+            nroDoc.placeholder = 'Alfanumérico';
+            nroDoc.oninput = () => { nroDoc.value = nroDoc.value.replace(/[^a-zA-Z0-9]/g, '').toUpperCase(); };
+        } else {
+            nroDoc.maxLength = 20;
+            nroDoc.placeholder = 'Número de documento';
+            nroDoc.oninput = null;
+        }
+    }
+
+    function validarDocumento() {
+        const sel   = document.getElementById('f-tipoDoc');
+        const texto = sel.options[sel.selectedIndex]?.text.toUpperCase() || '';
+        const nroDoc = document.getElementById('f-nroDoc').value.trim();
+        if (texto.includes('DNI'))       return /^\d{8}$/.test(nroDoc)      ? null : 'El DNI debe tener exactamente 8 dígitos';
+        if (texto.includes('CARNET'))    return /^[A-Z0-9]{6,12}$/.test(nroDoc) ? null : 'C.E. inválido (6-12 alfanuméricos)';
+        if (texto.includes('PASAPORTE')) return /^[A-Z0-9]{6,12}$/.test(nroDoc) ? null : 'Pasaporte inválido (6-12 alfanuméricos)';
+        return null;
+    }
+</script>
+</body>
+</html>

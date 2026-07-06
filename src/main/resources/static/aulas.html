@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Aulas — Sistema de Matrícula</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="app-layout">
+    <aside class="sidebar">
+        <div class="sidebar-logo"><h2>🎓 MatriculaIE</h2><span>Sistema de Gestión</span></div>
+        <div class="sidebar-user">
+            <div class="avatar" id="sidebar-avatar">A</div>
+            <div class="info"><p id="sidebar-name"></p><span id="sidebar-rol"></span></div>
+        </div>
+        <nav class="sidebar-nav"></nav>
+        <div class="sidebar-bottom"><a href="#" onclick="logout()">🚪 Cerrar sesión</a></div>
+    </aside>
+
+    <div class="main-content">
+        <div class="topbar">
+            <div><h1>Aulas</h1><div class="breadcrumb">Mantenimiento / Aulas</div></div>
+            <button id="btn-nuevo" class="btn btn-primary" data-permiso="insertar"
+                    onclick="abrirModal()">+ Nueva aula</button>
+        </div>
+
+        <div class="page-body">
+            <div class="card">
+                <div class="card-header">
+                    <h2>Listado por año</h2>
+                    <div class="search-bar">
+                        <label style="margin:0;font-size:13px">Año académico:</label>
+                        <select id="f-anio" onchange="cargar()" style="min-width:200px"></select>
+                    </div>
+                </div>
+                <div class="card-body" style="padding:0">
+                    <div class="table-wrapper">
+                        <table>
+                            <thead>
+                            <tr>
+                                <th>#</th><th>Nivel</th><th>Grado</th><th>Sección</th>
+                                <th>Cupos</th><th>Estado</th><th>Acciones</th>
+                            </tr>
+                            </thead>
+                            <tbody id="tabla-aulas">
+                            <tr><td colspan="7" style="text-align:center;padding:30px;color:var(--text-muted)">Seleccione un año</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal-overlay" id="modal-overlay">
+    <div class="modal">
+        <div class="modal-header">
+            <h3 id="modal-titulo">Nueva aula</h3>
+            <button class="modal-close" onclick="cerrarModal()">×</button>
+        </div>
+        <div class="modal-body">
+            <div id="modal-alert"></div>
+            <div class="form-grid">
+                <div class="form-group">
+                    <label>Año académico *</label>
+                    <select id="f-modal-anio"></select>
+                </div>
+                <div class="form-group">
+                    <label>Nivel *</label>
+                    <select id="f-nivel"></select>
+                </div>
+                <div class="form-group">
+                    <label>Grado *</label>
+                    <input type="number" id="f-grado" min="1" max="15" placeholder="Ej: 1">
+                </div>
+                <div class="form-group">
+                    <label>Sección * (letras)</label>
+                    <input type="text" id="f-seccion" maxlength="5" placeholder="A, B, C…"
+                           oninput="this.value = this.value.toUpperCase().replace(/[^A-Z]/g,'')">
+                </div>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-outline" onclick="cerrarModal()">Cancelar</button>
+            <button class="btn btn-primary" onclick="guardar()">Guardar</button>
+        </div>
+    </div>
+</div>
+
+<div id="toast"></div>
+<script src="js/api.js"></script>
+<script>
+    let editandoId = null;
+    let versionEditando = null;
+
+    (async () => {
+        if (!(await protegerPagina())) return;
+        await Promise.all([cargarAnios(), cargarNiveles()]);
+    })();
+
+    async function cargarAnios() {
+        try {
+            const anios = await api.get('/anios');
+            const opts = anios.map(a => `<option value="${a.idAnio}">${a.anio}</option>`).join('');
+            document.getElementById('f-anio').innerHTML = opts;
+            document.getElementById('f-modal-anio').innerHTML = opts;
+            if (anios.length) cargar();
+        } catch (e) {}
+    }
+
+    async function cargarNiveles() {
+        try {
+            const niveles = await api.get('/niveles');
+            document.getElementById('f-nivel').innerHTML =
+                '<option value="">Seleccione…</option>' +
+                niveles.map(n => `<option value="${n.idNivel}">${n.nombre}</option>`).join('');
+        } catch (e) {}
+    }
+
+    async function cargar() {
+        const idAnio = document.getElementById('f-anio').value;
+        if (!idAnio) return;
+        try {
+            const [aulas, cupos] = await Promise.all([
+                api.get('/aulas?idAnio=' + idAnio),
+                api.get('/aulas/cupos?idAnio=' + idAnio)
+            ]);
+            renderTabla(aulas, cupos);
+        } catch (e) {}
+    }
+
+    function renderTabla(aulas, cupos) {
+        const tbody = document.getElementById('tabla-aulas');
+        if (!aulas.length) {
+            tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:30px;color:var(--text-muted)">Sin aulas</td></tr>';
+            return;
+        }
+        const cuposMap = new Map(cupos.map(c => [c.idAula, c]));
+        tbody.innerHTML = aulas.map((a, i) => {
+            const c = cuposMap.get(a.idAula);
+            const cuposHtml = c
+                ? `${c.ocupados}/${c.capacidad} <span style="color:var(--text-muted)">(${c.disponibles} disp.)</span>`
+                : '—';
+            return `
+                <tr>
+                    <td>${i + 1}</td>
+                    <td>${a.nivel?.nombre || '—'}</td>
+                    <td>${a.grado}°</td>
+                    <td><strong>${a.seccion}</strong></td>
+                    <td>${cuposHtml}</td>
+                    <td>${a.estado ? '<span class="badge badge-success">Activo</span>' : '<span class="badge badge-danger">Inactivo</span>'}</td>
+                    <td>
+                        <button class="btn btn-outline btn-sm" data-permiso="editar" onclick="editar(${a.idAula})">✏</button>
+                        <button class="btn btn-danger btn-sm" data-permiso="eliminar" onclick="eliminar(${a.idAula})">🗑</button>
+                    </td>
+                </tr>`;
+        }).join('');
+        aplicarPermisosUI();
+    }
+
+    function abrirModal() {
+        editandoId = null; versionEditando = null;
+        document.getElementById('modal-titulo').textContent = 'Nueva aula';
+        document.getElementById('modal-alert').innerHTML = '';
+        document.getElementById('f-modal-anio').disabled = false;
+        document.getElementById('f-modal-anio').value = document.getElementById('f-anio').value;
+        document.getElementById('f-nivel').value = '';
+        document.getElementById('f-grado').value = '';
+        document.getElementById('f-seccion').value = '';
+        document.getElementById('modal-overlay').classList.add('open');
+    }
+
+    function cerrarModal() { document.getElementById('modal-overlay').classList.remove('open'); }
+
+    async function editar(id) {
+        try {
+            const a = await api.get('/aulas/' + id);
+            editandoId = a.idAula;
+            versionEditando = a.version;
+            document.getElementById('modal-titulo').textContent = 'Editar aula';
+            document.getElementById('modal-alert').innerHTML = '';
+            document.getElementById('f-modal-anio').value = a.anioAcademico?.idAnio || '';
+            document.getElementById('f-modal-anio').disabled = true;
+            document.getElementById('f-nivel').value = a.nivel?.idNivel || '';
+            document.getElementById('f-grado').value = a.grado;
+            document.getElementById('f-seccion').value = a.seccion;
+            document.getElementById('modal-overlay').classList.add('open');
+        } catch (e) {}
+    }
+
+    async function guardar() {
+        const alerta = document.getElementById('modal-alert');
+        const idAnio = parseInt(document.getElementById('f-modal-anio').value);
+        const idNivel = parseInt(document.getElementById('f-nivel').value);
+        const grado = parseInt(document.getElementById('f-grado').value);
+        const seccion = document.getElementById('f-seccion').value.trim();
+
+        if (!idAnio || !idNivel || !grado || !seccion) {
+            alerta.innerHTML = '<div class="alert alert-error">Complete todos los campos</div>';
+            return;
+        }
+
+        try {
+            if (editandoId) {
+                await api.put('/aulas/' + editandoId, { idNivel, grado, seccion, version: versionEditando });
+                toast('Aula actualizada');
+            } else {
+                await api.post('/aulas', { idAnio, idNivel, grado, seccion });
+                toast('Aula creada');
+            }
+            cerrarModal();
+            cargar();
+        } catch (e) {
+            alerta.innerHTML = `<div class="alert alert-error">${e.message}</div>`;
+        }
+    }
+
+    async function eliminar(id) {
+        if (!confirm('¿Eliminar esta aula?')) return;
+        try { await api.del('/aulas/' + id); toast('Aula eliminada'); cargar(); } catch (e) {}
+    }
+</script>
+</body>
+</html>

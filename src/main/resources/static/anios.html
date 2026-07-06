@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Años Académicos — Sistema de Matrícula</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="app-layout">
+    <aside class="sidebar">
+        <div class="sidebar-logo"><h2>🎓 MatriculaIE</h2><span>Sistema de Gestión</span></div>
+        <div class="sidebar-user">
+            <div class="avatar" id="sidebar-avatar">A</div>
+            <div class="info"><p id="sidebar-name"></p><span id="sidebar-rol"></span></div>
+        </div>
+        <nav class="sidebar-nav"></nav>
+        <div class="sidebar-bottom"><a href="#" onclick="logout()">🚪 Cerrar sesión</a></div>
+    </aside>
+
+    <div class="main-content">
+        <div class="topbar">
+            <div><h1>Años Académicos</h1><div class="breadcrumb">Mantenimiento / Años Académicos</div></div>
+            <button id="btn-nuevo" class="btn btn-primary" data-permiso="insertar"
+                    onclick="abrirModal()">+ Nuevo año</button>
+        </div>
+
+        <div class="page-body">
+            <div class="card">
+                <div class="card-header"><h2>Listado</h2></div>
+                <div class="card-body" style="padding:0">
+                    <div class="table-wrapper">
+                        <table>
+                            <thead>
+                            <tr>
+                                <th>#</th>
+                                <th>Año</th>
+                                <th>Descripción</th>
+                                <th>Estado</th>
+                                <th>Acciones</th>
+                            </tr>
+                            </thead>
+                            <tbody id="tabla-anios">
+                            <tr><td colspan="5" style="text-align:center;padding:30px;color:var(--text-muted)">Cargando…</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- MODAL -->
+<div class="modal-overlay" id="modal-overlay">
+    <div class="modal">
+        <div class="modal-header">
+            <h3>Nuevo año académico</h3>
+            <button class="modal-close" onclick="cerrarModal()">×</button>
+        </div>
+        <div class="modal-body">
+            <div id="modal-alert"></div>
+            <div class="form-grid">
+                <div class="form-group">
+                    <label>Año * (2000-2100)</label>
+                    <input type="number" id="f-anio" min="2000" max="2100"
+                           placeholder="Ej: 2027">
+                </div>
+                <div class="form-group full">
+                    <label>Descripción</label>
+                    <input type="text" id="f-desc" maxlength="100"
+                           placeholder="Ej: Año Académico 2027">
+                </div>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-outline" onclick="cerrarModal()">Cancelar</button>
+            <button class="btn btn-primary" onclick="guardar()">Guardar</button>
+        </div>
+    </div>
+</div>
+
+<div id="toast"></div>
+<script src="js/api.js"></script>
+<script>
+    (async () => {
+        if (!(await protegerPagina())) return;
+        await cargar();
+    })();
+
+    async function cargar() {
+        try {
+            const data = await api.get('/anios');
+            renderTabla(data);
+        } catch (e) {}
+    }
+
+    function renderTabla(data) {
+        const tbody = document.getElementById('tabla-anios');
+        if (!data.length) {
+            tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:30px;color:var(--text-muted)">Sin registros</td></tr>';
+            return;
+        }
+        tbody.innerHTML = data.map((a, i) => `
+            <tr>
+                <td>${i + 1}</td>
+                <td><strong>${a.anio}</strong></td>
+                <td>${a.descripcion || '—'}</td>
+                <td>${a.estado
+                    ? '<span class="badge badge-success">Activo</span>'
+                    : '<span class="badge badge-danger">Inactivo</span>'}</td>
+                <td>
+                    <button class="btn btn-danger btn-sm" data-permiso="eliminar"
+                            onclick="eliminar(${a.idAnio})">🗑</button>
+                </td>
+            </tr>
+        `).join('');
+        aplicarPermisosUI();
+    }
+
+    function abrirModal() {
+        document.getElementById('modal-alert').innerHTML = '';
+        document.getElementById('f-anio').value = '';
+        document.getElementById('f-desc').value = '';
+        document.getElementById('modal-overlay').classList.add('open');
+    }
+    function cerrarModal() {
+        document.getElementById('modal-overlay').classList.remove('open');
+    }
+
+    async function guardar() {
+        const alerta = document.getElementById('modal-alert');
+        const anio = parseInt(document.getElementById('f-anio').value);
+        const desc = document.getElementById('f-desc').value.trim();
+
+        if (!anio || anio < 2000 || anio > 2100) {
+            alerta.innerHTML = '<div class="alert alert-error">Ingrese un año entre 2000 y 2100</div>';
+            return;
+        }
+
+        try {
+            await api.post('/anios', { anio, descripcion: desc || null });
+            toast('Año académico creado');
+            cerrarModal();
+            cargar();
+        } catch (e) {
+            alerta.innerHTML = `<div class="alert alert-error">${e.message}</div>`;
+        }
+    }
+
+    async function eliminar(id) {
+        if (!confirm('¿Eliminar este año académico?')) return;
+        try {
+            await api.del('/anios/' + id);
+            toast('Año eliminado');
+            cargar();
+        } catch (e) {}
+    }
+</script>
+</body>
+</html>

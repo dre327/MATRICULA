@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Conceptos — Sistema de Matrícula</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="app-layout">
+    <aside class="sidebar">
+        <div class="sidebar-logo"><h2>🎓 MatriculaIE</h2><span>Sistema de Gestión</span></div>
+        <div class="sidebar-user">
+            <div class="avatar" id="sidebar-avatar">A</div>
+            <div class="info"><p id="sidebar-name"></p><span id="sidebar-rol"></span></div>
+        </div>
+        <nav class="sidebar-nav"></nav>
+        <div class="sidebar-bottom"><a href="#" onclick="logout()">🚪 Cerrar sesión</a></div>
+    </aside>
+
+    <div class="main-content">
+        <div class="topbar">
+            <div><h1>Conceptos</h1><div class="breadcrumb">Mantenimiento / Conceptos (Tarifario)</div></div>
+            <div style="display:flex;gap:8px">
+                <button id="btn-clonar" class="btn btn-outline" data-permiso="insertar"
+                        onclick="abrirClonar()">📋 Clonar de otro año</button>
+                <button id="btn-nuevo" class="btn btn-primary" data-permiso="insertar"
+                        onclick="abrirModal()">+ Nuevo concepto</button>
+            </div>
+        </div>
+
+        <div class="page-body">
+            <div class="card">
+                <div class="card-header">
+                    <h2>Conceptos por año</h2>
+                    <div class="search-bar">
+                        <label style="margin:0;font-size:13px">Año académico:</label>
+                        <select id="f-anio" onchange="cargar()" style="min-width:200px"></select>
+                    </div>
+                </div>
+                <div class="card-body" style="padding:0">
+                    <div class="table-wrapper">
+                        <table>
+                            <thead>
+                            <tr>
+                                <th>Orden</th><th>Tipo</th><th>Descripción</th><th>Monto</th>
+                                <th>Obligatorio</th><th>Estado</th><th>Acciones</th>
+                            </tr>
+                            </thead>
+                            <tbody id="tabla-conceptos">
+                            <tr><td colspan="7" style="text-align:center;padding:30px;color:var(--text-muted)">Seleccione un año</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal CRUD -->
+<div class="modal-overlay" id="modal-overlay">
+    <div class="modal">
+        <div class="modal-header">
+            <h3 id="modal-titulo">Nuevo concepto</h3>
+            <button class="modal-close" onclick="cerrarModal()">×</button>
+        </div>
+        <div class="modal-body">
+            <div id="modal-alert"></div>
+            <div class="form-grid">
+                <div class="form-group">
+                    <label>Tipo de concepto *</label>
+                    <select id="f-tipo" onchange="onTipoChange()"></select>
+                </div>
+                <div class="form-group" id="grupo-orden" style="display:none">
+                    <label>Orden</label>
+                    <input type="number" id="f-orden" min="1" max="999">
+                </div>
+                <div class="form-group full" id="grupo-desc">
+                    <label>Descripción *</label>
+                    <input type="text" id="f-desc" maxlength="100" placeholder="Ej: Matrícula 2027">
+                </div>
+                <div class="form-group full" id="aviso-recurrente" style="display:none">
+                    <div class="alert" style="background:#e3f2fd;padding:10px;border-radius:6px;font-size:13px">
+                        ℹ Al guardar se generarán <strong id="aviso-cantidad">10</strong> conceptos
+                        automáticamente: <strong id="aviso-lista">MENSUALIDAD MARZO, ABRIL, …, DICIEMBRE</strong>.
+                        Solo cargá el monto — la descripción se arma por vos.
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Monto (S/) *</label>
+                    <input type="number" id="f-monto" step="0.01" min="0.01">
+                </div>
+                <div class="form-group">
+                    <label>Obligatorio</label>
+                    <select id="f-obl">
+                        <option value="true">Sí</option>
+                        <option value="false">No</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-outline" onclick="cerrarModal()">Cancelar</button>
+            <button class="btn btn-primary" onclick="guardar()">Guardar</button>
+        </div>
+    </div>
+</div>
+
+<!-- Modal clonar -->
+<div class="modal-overlay" id="modal-clonar">
+    <div class="modal">
+        <div class="modal-header">
+            <h3>Clonar conceptos de otro año</h3>
+            <button class="modal-close" onclick="cerrarClonar()">×</button>
+        </div>
+        <div class="modal-body">
+            <div id="clonar-alert"></div>
+            <p style="margin-bottom:12px;color:var(--text-muted);font-size:13px">
+                Copia todos los conceptos activos del año origen al año destino.
+                Requiere que el año destino no tenga conceptos.
+            </p>
+            <div class="form-grid">
+                <div class="form-group">
+                    <label>Año origen *</label>
+                    <select id="c-origen"></select>
+                </div>
+                <div class="form-group">
+                    <label>Año destino *</label>
+                    <select id="c-destino"></select>
+                </div>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-outline" onclick="cerrarClonar()">Cancelar</button>
+            <button class="btn btn-primary" onclick="clonar()">Clonar</button>
+        </div>
+    </div>
+</div>
+
+<div id="toast"></div>
+<script src="js/api.js"></script>
+<script>
+    let editandoId = null;
+    let versionEditando = null;
+
+    (async () => {
+        if (!(await protegerPagina())) return;
+        await Promise.all([cargarAnios(), cargarTipos()]);
+    })();
+
+    async function cargarAnios() {
+        try {
+            const anios = await api.get('/anios');
+            const opts = anios.map(a => `<option value="${a.idAnio}">${a.anio}</option>`).join('');
+            document.getElementById('f-anio').innerHTML = opts;
+            document.getElementById('c-origen').innerHTML = opts;
+            document.getElementById('c-destino').innerHTML = opts;
+            if (anios.length) cargar();
+        } catch (e) {}
+    }
+
+    let tiposConcepto = [];   // guardado para consultar esRecurrente
+
+    async function cargarTipos() {
+        try {
+            tiposConcepto = await api.get('/tipos-concepto');
+            document.getElementById('f-tipo').innerHTML =
+                '<option value="">Seleccione…</option>' +
+                tiposConcepto.map(t => `<option value="${t.idTipoConc}">${t.descripcion}</option>`).join('');
+        } catch (e) {}
+    }
+
+    /** Se dispara al elegir tipo — muestra u oculta el aviso de recurrente */
+    function onTipoChange() {
+        const id = parseInt(document.getElementById('f-tipo').value);
+        const tipo = tiposConcepto.find(t => t.idTipoConc === id);
+        const esRecurrente = !!(tipo && tipo.esRecurrente);
+        document.getElementById('grupo-desc').style.display   = esRecurrente ? 'none' : '';
+        document.getElementById('aviso-recurrente').style.display = esRecurrente ? '' : 'none';
+        if (esRecurrente) {
+            document.getElementById('aviso-cantidad').textContent = tipo.cantidadCuotas ?? 10;
+            const meses = ['MARZO','ABRIL','MAYO','JUNIO','JULIO','AGOSTO','SEPTIEMBRE','OCTUBRE','NOVIEMBRE','DICIEMBRE'];
+            const n = Math.min(tipo.cantidadCuotas ?? 10, meses.length);
+            document.getElementById('aviso-lista').textContent =
+                `${tipo.descripcion} ${meses.slice(0,n).join(', ')}`;
+        }
+    }
+
+    async function cargar() {
+        const idAnio = document.getElementById('f-anio').value;
+        if (!idAnio) return;
+        try {
+            const data = await api.get('/conceptos?idAnio=' + idAnio);
+            renderTabla(data);
+        } catch (e) {}
+    }
+
+    function renderTabla(data) {
+        const tbody = document.getElementById('tabla-conceptos');
+        if (!data.length) {
+            tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:30px;color:var(--text-muted)">Sin conceptos</td></tr>';
+            return;
+        }
+        tbody.innerHTML = data.map(c => `
+            <tr>
+                <td><strong>${c.orden}</strong></td>
+                <td>${c.tipoConcepto?.descripcion || '—'}</td>
+                <td>${c.descripcion}</td>
+                <td><strong>S/ ${parseFloat(c.monto).toFixed(2)}</strong></td>
+                <td>${c.esObligatorio ? '<span class="badge badge-info">Sí</span>' : '<span class="badge">No</span>'}</td>
+                <td>${c.estado ? '<span class="badge badge-success">Activo</span>' : '<span class="badge badge-danger">Inactivo</span>'}</td>
+                <td>
+                    <button class="btn btn-outline btn-sm" data-permiso="editar" onclick="editar(${c.idConcepto})">✏</button>
+                    <button class="btn btn-danger btn-sm" data-permiso="eliminar" onclick="eliminar(${c.idConcepto})">🗑</button>
+                </td>
+            </tr>`).join('');
+        aplicarPermisosUI();
+    }
+
+    function abrirModal() {
+        editandoId = null; versionEditando = null;
+        document.getElementById('modal-titulo').textContent = 'Nuevo concepto';
+        document.getElementById('modal-alert').innerHTML = '';
+        document.getElementById('f-tipo').value = '';
+        document.getElementById('f-tipo').disabled = false;
+        document.getElementById('f-orden').value = '';
+        document.getElementById('grupo-orden').style.display = 'none';        // orden auto
+        document.getElementById('grupo-desc').style.display = '';              // por default descripcion visible
+        document.getElementById('aviso-recurrente').style.display = 'none';    // aviso oculto hasta elegir tipo
+        document.getElementById('f-desc').value = '';
+        document.getElementById('f-monto').value = '';
+        document.getElementById('f-obl').value = 'true';
+        document.getElementById('modal-overlay').classList.add('open');
+    }
+
+    function cerrarModal() { document.getElementById('modal-overlay').classList.remove('open'); }
+
+    async function editar(id) {
+        try {
+            const c = await api.get('/conceptos/' + id);
+            editandoId = c.idConcepto;
+            versionEditando = c.version;
+            document.getElementById('modal-titulo').textContent = 'Editar concepto';
+            document.getElementById('modal-alert').innerHTML = '';
+            document.getElementById('f-tipo').value = c.tipoConcepto?.idTipoConc || '';
+            document.getElementById('f-tipo').disabled = true;                     // no cambiable en update
+            document.getElementById('grupo-orden').style.display = '';             // visible al editar
+            document.getElementById('f-orden').value = c.orden;
+            document.getElementById('f-desc').value = c.descripcion;
+            document.getElementById('f-monto').value = c.monto;
+            document.getElementById('f-obl').value = String(c.esObligatorio);
+            document.getElementById('modal-overlay').classList.add('open');
+        } catch (e) {}
+    }
+
+    async function guardar() {
+        const alerta = document.getElementById('modal-alert');
+        const idAnio = parseInt(document.getElementById('f-anio').value);
+        const idTipoConcepto = parseInt(document.getElementById('f-tipo').value);
+        const desc = document.getElementById('f-desc').value.trim();
+        const monto = parseFloat(document.getElementById('f-monto').value);
+        const esObligatorio = document.getElementById('f-obl').value === 'true';
+
+        // ¿Es tipo recurrente? Entonces no exige descripcion
+        const tipo = tiposConcepto.find(t => t.idTipoConc === idTipoConcepto);
+        const esRecurrente = !!(tipo && tipo.esRecurrente);
+
+        if ((!esRecurrente && !desc) || !monto || monto <= 0) {
+            alerta.innerHTML = '<div class="alert alert-error">Complete los campos y verifique el monto</div>';
+            return;
+        }
+
+        try {
+            if (editandoId) {
+                const orden = parseInt(document.getElementById('f-orden').value);
+                if (!orden) {
+                    alerta.innerHTML = '<div class="alert alert-error">El orden es obligatorio al editar</div>';
+                    return;
+                }
+                await api.put('/conceptos/' + editandoId, {
+                    descripcion: desc, monto, orden, esObligatorio, version: versionEditando
+                });
+                toast('Concepto actualizado');
+            } else {
+                if (!idTipoConcepto) { alerta.innerHTML = '<div class="alert alert-error">Seleccione tipo</div>'; return; }
+                const body = { idAnio, idTipoConcepto, monto, esObligatorio };
+                if (!esRecurrente) body.descripcion = desc;   // recurrente: backend arma nombres
+                const res = await api.post('/conceptos', body);
+                toast(esRecurrente
+                    ? `${res.length} conceptos generados automáticamente`
+                    : 'Concepto creado');
+            }
+            document.getElementById('f-tipo').disabled = false;
+            cerrarModal();
+            cargar();
+        } catch (e) {
+            alerta.innerHTML = `<div class="alert alert-error">${e.message}</div>`;
+        }
+    }
+
+    async function eliminar(id) {
+        if (!confirm('¿Eliminar este concepto?')) return;
+        try { await api.del('/conceptos/' + id); toast('Concepto eliminado'); cargar(); } catch (e) {}
+    }
+
+    // ── CLONAR ───────────────────────────────────────────────
+    function abrirClonar() {
+        document.getElementById('clonar-alert').innerHTML = '';
+        document.getElementById('modal-clonar').classList.add('open');
+    }
+    function cerrarClonar() { document.getElementById('modal-clonar').classList.remove('open'); }
+
+    async function clonar() {
+        const alerta = document.getElementById('clonar-alert');
+        const origen = parseInt(document.getElementById('c-origen').value);
+        const destino = parseInt(document.getElementById('c-destino').value);
+        if (!origen || !destino) return;
+        if (origen === destino) {
+            alerta.innerHTML = '<div class="alert alert-error">El año origen y destino deben ser distintos</div>';
+            return;
+        }
+        try {
+            const res = await api.post('/conceptos/clonar', { idAnioOrigen: origen, idAnioDestino: destino });
+            toast(`${res.length} conceptos clonados`);
+            cerrarClonar();
+            document.getElementById('f-anio').value = destino;
+            cargar();
+        } catch (e) {
+            alerta.innerHTML = `<div class="alert alert-error">${e.message}</div>`;
+        }
+    }
+</script>
+</body>
+</html>
